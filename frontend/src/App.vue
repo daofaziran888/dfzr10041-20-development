@@ -3,6 +3,7 @@
     <aside class="app-side">
       <h1 class="app-title">拾音工坊 · 日志采集与事件流处理平台</h1>
       <nav class="nav-list">
+        <RouterLink class="nav-item" to="/field-deactivation">字段停用试跑</RouterLink>
         <RouterLink v-for="item in navItems" :key="item.path" :to="item.path" class="nav-item">
           {{ item.label }}
         </RouterLink>

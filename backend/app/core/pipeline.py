@@ -327,6 +327,49 @@ class IngestPipeline:
             "version_time": datetime.now().isoformat(),
         }
 
+    def evaluate_schema_change_impact(
+        self,
+        entries: list[LogEntry],
+        old_rule: ParseRule,
+        new_rule: ParseRule,
+    ) -> dict[str, Any]:
+        """Schema 比较结果串联实际解析入口 apply_parse_rules。
+
+        detect_schema_change 只给字段集合层面的兼容判定，这里再用新规则对同一批
+        真实原行重跑一次解析，输出逐行实际解析字段与失败行，作为本批来源能否
+        继续切换新版的依据，而不是只比较版本名字段清单。
+        """
+        change = self.detect_schema_change(old_rule.field_names, new_rule.field_names)
+        parsed = self.apply_parse_rules(list(entries), new_rule)
+        line_results: list[dict[str, Any]] = []
+        ok_count = 0
+        failed_count = 0
+        for entry in parsed:
+            is_ok = entry.parse_status == ParseResultStatus.OK
+            ok_count += 1 if is_ok else 0
+            failed_count += 0 if is_ok else 1
+            line_results.append({
+                "line_number": entry.line_number,
+                "raw_line": entry.raw_line,
+                "parse_status": entry.parse_status.value,
+                "parsed_fields": dict(entry.parsed_fields or {}),
+                "removed_field_leaked": [
+                    name for name in change["removed_fields"]
+                    if name in (entry.parsed_fields or {})
+                ],
+            })
+        # 兼容不仅取决于字段集合，还取决于新规则对真实原行的实际解析结果
+        can_continue = change["is_compatible"] or failed_count == 0
+        return {
+            "schema_change": change,
+            "applied_rule_id": new_rule.rule_id,
+            "total_lines": len(parsed),
+            "parse_ok_count": ok_count,
+            "parse_failed_count": failed_count,
+            "can_continue": can_continue and failed_count == 0,
+            "line_results": line_results,
+        }
+
     # ---------- 数据流 8: ingest_job → ingest_metric → quality_report ----------
 
     def compute_ingest_metrics(self, job: IngestJob, elapsed_ms: float,
